@@ -346,7 +346,7 @@ class MultiHeadAttention:
     query = query.reshape(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
     key = key.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
     value = value.reshape(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
-    scores = (query / math.sqrt(self.k_channels)) @ key.transpose(-2, -1)
+    scores = (query / math.sqrt(self.k_channels)) @ key.mT
     if self.window_size is not None:
       assert t_s == t_t, "Relative attention is only available for self-attention."
       key_relative_embeddings = self._get_relative_embeddings(self.emb_rel_k, t_s)
@@ -366,7 +366,7 @@ class MultiHeadAttention:
     output = output.transpose(2, 3).contiguous().reshape(b, d, t_t)  # [b, n_h, t_t, d_k] -> [b, d, t_t]
     return output, p_attn
   def _matmul_with_relative_values(self, x, y): return x.matmul(y.unsqueeze(0))                 # x: [b, h, l, m], y: [h or 1, m, d], ret: [b, h, l, d]
-  def _matmul_with_relative_keys(self, x, y): return x.matmul(y.unsqueeze(0).transpose(-2, -1)) # x: [b, h, l, d], y: [h or 1, m, d], re, : [b, h, l, m]
+  def _matmul_with_relative_keys(self, x, y): return x.matmul(y.unsqueeze(0).mT) # x: [b, h, l, d], y: [h or 1, m, d], re, : [b, h, l, m]
   def _get_relative_embeddings(self, relative_embeddings, length):
     pad_length, slice_start_position = max(length - (self.window_size + 1), 0), max((self.window_size + 1) - length, 0)
     padded_relative_embeddings = relative_embeddings if pad_length <= 0\

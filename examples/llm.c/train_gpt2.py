@@ -36,7 +36,7 @@ class CausalSelfAttention:
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
     # manual implementation of attention
-    att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+    att = (q @ k.mT) * (1.0 / math.sqrt(k.size(-1)))
     att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
     att = att.softmax()
     y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
