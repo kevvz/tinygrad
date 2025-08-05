@@ -7,7 +7,7 @@ import functools
 def orthogonality_helper(A:Tensor,tolerance=1.0e-5):
   b_shape,m = A.shape[0:-2],A.shape[-2]  #outer dimension should be the dim along orthogonality
   A_identity = (Tensor.eye(m).reshape((1,) * len(b_shape)+(m,m)).expand(b_shape+(m,m)))
-  np.testing.assert_allclose((A @ A.transpose(-2,-1)).numpy(),A_identity.numpy(),atol=tolerance,rtol=tolerance)
+  np.testing.assert_allclose((A @ A.mT).numpy(),A_identity.numpy(),atol=tolerance,rtol=tolerance)
 
 def reconstruction_helper(A:List[Tensor],B:Tensor, tolerance=1.0e-5):
   reconstructed_tensor = functools.reduce(Tensor.matmul, A)
@@ -38,7 +38,7 @@ class TestLinAlg(unittest.TestCase):
       s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
       #reduced U,V is only orthogonal along smaller dim
       if (m < n): orthogonality_helper(U),orthogonality_helper(V)
-      else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
+      else: orthogonality_helper(U.mT),orthogonality_helper(V.mT)
       reconstruction_helper([U,s_diag,V],a)
 
   @unittest.skip("very big. recommend wrapping with TinyJit around inner function")

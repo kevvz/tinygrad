@@ -1508,6 +1508,11 @@ class Tensor(MathTrait):
   def T(self) -> Tensor:
     """`.T` is an alias for `.transpose()`."""
     return self.transpose()
+  
+  @property
+  def mT(self) -> Tensor:
+    """`.mT` is an alias for `.transpose(-2,-1)`."""
+    return self.transpose(-2, -1)
 
   def transpose(self, dim0=1, dim1=0) -> Tensor:
     """
@@ -3912,7 +3917,7 @@ class Tensor(MathTrait):
     if enable_gqa:
       key = key.repeat_interleave(self.shape[-3] // key.shape[-3], dim=-3)
       value = value.repeat_interleave(self.shape[-3] // value.shape[-3], dim=-3)
-    qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
+    qk = self.matmul(key.mT, dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
@@ -4044,8 +4049,8 @@ class Tensor(MathTrait):
       w = x.unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
       w[..., 0, 0] = 1
       tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
-      R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
-      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
+      R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.mT @ R[..., i:m, :])
+      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau.mT * w.mT)
     return Q,R
 
   def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
@@ -4053,7 +4058,7 @@ class Tensor(MathTrait):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
-    Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2, -1)))
+    Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.mT))
     num, q_num = int(min(m, n)), int(max(m, n))
     U = R.shrink(tuple([(0, self.shape[i]) for i in range(self.ndim - 2)] + [(0, num), (0, num)])).contiguous()
     V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + 2 * (num,)).contiguous()
@@ -4096,7 +4101,7 @@ class Tensor(MathTrait):
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
-    return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
+    return (U, S, V.mT) if m >= n else (V, S, U.mT)
 
   # ***** Tensor Properties *****
 

@@ -1842,6 +1842,7 @@ class TestOps(unittest.TestCase):
 
   def test_transpose(self):
     helper_test_op([(3,3)], lambda x: x.T)
+    helper_test_op([(3,3,3)], lambda x: x.mT)
     helper_test_op([(3,3,3)], lambda x: x.transpose(1,2))
     helper_test_op([(3,3,3)], lambda x: x.transpose(0,2))
 
