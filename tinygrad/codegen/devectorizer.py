@@ -315,6 +315,13 @@ def reduce_rangeless(red:UOp):
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
+def multi_fold_range(load:UOp,rs:UOp,vars:UOp):
+  r_list = [a for a in load.toposort() if a.op is Ops.RANGE]
+  var_list = [a for a in load.toposort() if a.op is Ops.DEFINE_VAR]
+
+
+
+  pass
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
@@ -355,6 +362,7 @@ pm_reduce_collapse = PatternMatcher([
 ])+sym
 
 def reduce_collapse(red:UOp):
+  if len(red.src) < 2: return None
   included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
   if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
   replaces: dict[UOp, UOp] = {}
@@ -364,6 +372,7 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
+  #replace all ranges with def_var
   # TODO: why is REDUCE needed here and just RANGE isn't enough?
   if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
@@ -381,7 +390,7 @@ pm_reduce = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
+  (UPat(Ops.REDUCE , name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
