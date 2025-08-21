@@ -315,6 +315,16 @@ def reduce_rangeless(red:UOp):
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
+r_to_var = PatternMatcher([ ((UPat(Ops.RANGE,name="r") != UPat(Ops.DEFINE_VAR, name="var")) != UPat.var("x"),
+                              lambda r,x,var: ((var < 0) != x) & (var < r.src[0])) ])
+
+def range_to_var(buf:UOp, r:UOp, var:UOp):
+  if var.op not in {Ops.AND,Ops.CMPNE}: return None
+  if not (r_list := [a for a in r.toposort() if a.op is Ops.RANGE]): return None
+  var = graph_rewrite(var, r_to_var)
+  var_list = [a for a in var.toposort() if a.op is Ops.DEFINE_VAR]
+  return (buf.index(r.substitute(dict(zip(r_list,var_list))), var))
+
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
@@ -340,8 +350,7 @@ pm_reduce_collapse = PatternMatcher([
   (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
   # INDEX on RANGE / gated RANGE
-  (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
-   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
+  (UPat.var("buf").index(UPat.var("r").or_casted(), UPat.var("var")), range_to_var),
   # AND on WHERE
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
    .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
@@ -355,6 +364,7 @@ pm_reduce_collapse = PatternMatcher([
 ])+sym
 
 def reduce_collapse(red:UOp):
+  if len(red.src) < 2: return None
   included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
   if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
   replaces: dict[UOp, UOp] = {}
@@ -380,7 +390,7 @@ pm_reduce = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
+  (UPat(Ops.REDUCE , name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
