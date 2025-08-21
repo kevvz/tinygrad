@@ -316,7 +316,7 @@ def reduce_rangeless(red:UOp):
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 r_to_var = PatternMatcher([ ((UPat(Ops.RANGE,name="r") != UPat(Ops.DEFINE_VAR, name="var")) != UPat.var("x"),
-    lambda r,x,var: ((var < 0) != x) & (var < r.src[0])) ])
+                              lambda r,x,var: ((var < 0) != x) & (var < r.src[0])) ])
 
 def range_to_var(buf:UOp, r:UOp, var:UOp):
   if var.op not in {Ops.AND,Ops.CMPNE}: return None
