@@ -86,9 +86,9 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
-    if SPEC.value > 1:
+    if (spec:=SPEC.value) > 1:
       from tinygrad.uop.spec import full_spec, test_pyrender
-      if SPEC.value > 2: test_pyrender(created)
+      if spec > 2: test_pyrender(created)
       with Context(IGNORE_OOB=1): fret = cast(bool|None, full_spec.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
