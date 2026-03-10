@@ -383,6 +383,48 @@ class TestLinearizer(unittest.TestCase):
     # the global store doesn't change
     assert stores[1].src[1].dtype == dtypes.float
 
+class TestByteLoadToWide(unittest.TestCase):
+
+  def _loads(self, r:Tensor, opts:list[Opt]) -> list[UOp]:
+    uops = get_program(r.schedule()[-1].ast, renderer=Device[Device.DEFAULT].renderer, opts=opts).uops
+    return [u for u in uops if u.op is Ops.LOAD]
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  def test_uint8_load_to_uint16(self):
+    a = Tensor.arange(16, dtype=dtypes.uint8).contiguous().realize()
+    r = a.cast(dtypes.int32)
+    loads = self._loads(r, [Opt(op=OptOps.UPCAST, axis=0, arg=2)])
+    wide = [l for l in loads if l.dtype == dtypes.uint16]
+    assert len(wide) >= 1, f"expected a uint16 wide load, got dtypes: {[l.dtype for l in loads]}"
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  def test_uint8_load_to_uint32(self):
+    a = Tensor.arange(16, dtype=dtypes.uint8).contiguous().realize()
+    r = a.cast(dtypes.int32)
+    loads = self._loads(r, [Opt(op=OptOps.UPCAST, axis=0, arg=4)])
+    wide = [l for l in loads if l.dtype == dtypes.uint32]
+    assert len(wide) >= 1, f"expected a uint32 wide load, got dtypes: {[l.dtype for l in loads]}"
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  def test_uint8_load_uint16_unaligned(self):
+    # slice starts at odd byte offset (index 1), but byte_pack handles each scalar load individually
+    a = Tensor.arange(16, dtype=dtypes.uint8).contiguous().realize()
+    r = a[1:13].cast(dtypes.int32)  # base starts at 1 (odd), size 12 allows UPCAST by 2
+    loads = self._loads(r, [Opt(op=OptOps.UPCAST, axis=0, arg=2)])
+    wide = [l for l in loads if l.dtype in (dtypes.uint16, dtypes.uint32)]
+    assert len(wide) >= 1, f"expected byte_pack to generate aligned wide loads for odd-offset slice, got dtypes: {[l.dtype for l in loads]}"
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  def test_q8_scale_widens_to_uint32(self):
+    # Q8_0-like: scalar uint8 scale byte at index 0 (divisible by 4) — byte_pack must widen to uint32
+    buf = Tensor.empty(34, dtype=dtypes.uint8).realize()
+    # scale at byte 0 (broadcast), quantized data at bytes 2..33
+    scale = buf[0:1].cast(dtypes.float32)
+    r = scale * buf[2:34].cast(dtypes.int8).cast(dtypes.float32)
+    uops = get_program(r.schedule()[-1].ast, renderer=Device[Device.DEFAULT].renderer).uops
+    loads = [u for u in uops if u.op is Ops.LOAD]
+    assert any(l.dtype == dtypes.uint32 for l in loads), f"expected uint32 wide load from byte_pack, got: {[l.dtype for l in loads]}"
+
 # *** helpers ***
 
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
