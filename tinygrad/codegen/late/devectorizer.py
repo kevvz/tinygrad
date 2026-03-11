@@ -105,7 +105,9 @@ def fold_expanded_index(midx:UOp):
 
 def scalar_to_wide_type(ld:UOp, b_ptr:UOp):
   # NOTE: this depends on a lot of consecutive bytes being loaded, otherwise this may hurt performance
+  # python, onnx, lvp
   if (b_type:=ld.dtype) not in (dtypes.uint8,): return None # more dtypes as needed, no vecs
+  if b_ptr.src[1].dtype.scalar() is not dtypes.index: return None
   idx, mask = b_ptr.src[1].get_idx(), b_ptr.src[1].get_valid()
   base, c = (idx.src[0], int(idx.src[1].arg)) if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST else (idx, 0)
   # try widening by large dtypes first
