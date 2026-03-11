@@ -103,30 +103,9 @@ def fold_expanded_index(midx:UOp):
   post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace).vec(global_offset), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
-num_to_uint = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32} # TODO: dtype conversion?
-
-def widen_load(ld:UOp, b_ptr:UOp):
-  if len(ld.src) > 1: return None # no masks
-  if ld.dtype.count == 1: return None # no non-vecs
-  if (in_type:=ld.dtype.scalar()) not in (dtypes.uint8, dtypes.uint16): return None
-  # is it worth 16 bit widening? they could be stuffed into uint32.vec(4) loads
-  if (bits:=in_type.itemsize * 8) not in (8, 16): return None
-  wide_bits = ld.dtype.bitsize if ld.dtype.bitsize < 32 else 32
-  elems_per_wide = wide_bits // bits
-  # no mods, idivs, no unaligned loads
-  if (idx:=b_ptr.src[1]).get_idx().divides(elems_per_wide) is None: return None
-  wide_ptr = num_to_uint[wide_bits].ptr(size=b_ptr.ptrdtype.size, addrspace=b_ptr.ptrdtype.addrspace)
-  def make_wide_load(i):
-    new_idx = b_ptr.replace(src=(b_ptr.src[0], idx + idx.const_like(i * elems_per_wide)) + b_ptr.src[2:])
-    return ld.replace(src=(new_idx.cast(wide_ptr),), dtype=num_to_uint[wide_bits])
-  wide_loads = [make_wide_load(i) for i in range((ld.dtype.count * bits) // wide_bits)]
-  return UOp(Ops.VECTORIZE, ld.dtype, tuple(
-    ((wide_loads[i // elems_per_wide] >> ((i % elems_per_wide) * bits)) & ((1 << bits) - 1))
-    .cast(num_to_uint[bits]).bitcast(in_type) for i in range(ld.dtype.count)))
-
-def byte_pack(ld:UOp, b_ptr:UOp):
+def scalar_to_wide_type(ld:UOp, b_ptr:UOp):
   # NOTE: this depends on a lot of consecutive bytes being loaded, otherwise this may hurt performance
-  if ld.dtype not in (dtypes.uint8,): return None # more dtypes as needed
+  if (b_type:=ld.dtype) not in (dtypes.uint8,): return None # more dtypes as needed, no vecs
   idx, mask = b_ptr.src[1].get_idx(), b_ptr.src[1].get_valid()
   base, c = (idx.src[0], int(idx.src[1].arg)) if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST else (idx, 0)
   # try widening by large dtypes first
@@ -134,11 +113,13 @@ def byte_pack(ld:UOp, b_ptr:UOp):
     if base is not None and base.divides(n) is None: continue # base has to be aligned
     aligned_c = c - c % n
     aligned_base = idx.const_like(aligned_c) if base is None else (base + base.const_like(aligned_c) if aligned_c else base)
+    if aligned_base.vmax + n - 1 >= b_ptr.ptrdtype.size: continue
     wide_ptr = wide_dtype.ptr(size=b_ptr.ptrdtype.size, addrspace=b_ptr.ptrdtype.addrspace)
     raw_idx = aligned_base.valid(mask) if mask is not None else aligned_base
     new_idx = b_ptr.replace(src=(b_ptr.src[0], raw_idx) + b_ptr.src[2:])
     wide_load = ld.replace(src=(new_idx.cast(wide_ptr),), dtype=wide_dtype)
-    return ((wide_load >> ((c % n) * 8)) & 0xFF).cast(dtypes.uint8).bitcast(ld.dtype) # TODO: generalize this
+    return ((wide_load >> ((c % n) * 8)) & ((1 << ld.dtype.bitsize) - 1)).cast(dtypes.uint8).bitcast(b_type)
+  return None
 
 def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   # TODO: this is written in many places
@@ -161,9 +142,7 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.VECTORIZE, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
   # convert scalar byte loads into aligned uint32 wide loads with byte lane extraction
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="b_ptr"),), name="ld"), byte_pack),
-  # convert vec byte loads to wider dtype loads. this is the "vectorized" version of byte pack
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="b_ptr").cast(),), name="ld", allow_any_len=True), widen_load),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="b_ptr"),), name="ld"), scalar_to_wide_type),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
