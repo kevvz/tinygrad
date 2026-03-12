@@ -106,13 +106,15 @@ def fold_expanded_index(midx:UOp):
 def scalar_to_wide_type(ld:UOp, b_ptr:UOp):
   # NOTE: this depends on a lot of consecutive bytes being loaded, otherwise this may hurt performance
   # python, onnx, lvp
+  if getenv("WEBGPU"): return None # TODO: remove packed_load, store and replace it with this
   if (b_type:=ld.dtype) not in (dtypes.uint8,): return None # more dtypes as needed, no vecs
   if b_ptr.src[1].dtype.scalar() is not dtypes.index: return None
   idx, mask = b_ptr.src[1].get_idx(), b_ptr.src[1].get_valid()
   base, c = (idx.src[0], int(idx.src[1].arg)) if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST else (idx, 0)
   # try widening by large dtypes first
   for wide_dtype, n in ((dtypes.uint32, 4), (dtypes.uint16, 2)):
-    if base is not None and base.divides(n) is None: continue # base has to be aligned
+    # base has to be aligned
+    if (base is not None and base.divides(n) is None) or (b_ptr.ptrdtype.size % n != 0): continue
     aligned_c = c - c % n
     aligned_base = idx.const_like(aligned_c) if base is None else (base + base.const_like(aligned_c) if aligned_c else base)
     if aligned_base.vmax + n - 1 >= b_ptr.ptrdtype.size: continue
