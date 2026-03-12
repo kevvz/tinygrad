@@ -105,8 +105,8 @@ def fold_expanded_index(midx:UOp):
 
 def scalar_to_wide_type(ld:UOp, b_ptr:UOp):
   # NOTE: this depends on a lot of consecutive bytes being loaded, otherwise this may hurt performance
-  # python, onnx, lvp
   if getenv("WEBGPU"): return None # TODO: remove packed_load, store and replace it with this
+  # any load is a bitload, so we load as uint then bitcast to the outtype
   if (b_type:=ld.dtype) not in (dtypes.uint8,): return None # more dtypes as needed, no vecs
   if b_ptr.src[1].dtype.scalar() is not dtypes.index: return None
   idx, mask = b_ptr.src[1].get_idx(), b_ptr.src[1].get_valid()
@@ -118,9 +118,9 @@ def scalar_to_wide_type(ld:UOp, b_ptr:UOp):
     aligned_c = c - c % n
     aligned_base = idx.const_like(aligned_c) if base is None else (base + base.const_like(aligned_c) if aligned_c else base)
     if aligned_base.vmax + n - 1 >= b_ptr.ptrdtype.size: continue
+    # mutating the cast seems safer than mutating index
     wide_ptr = wide_dtype.ptr(size=b_ptr.ptrdtype.size, addrspace=b_ptr.ptrdtype.addrspace)
-    raw_idx = aligned_base.valid(mask) if mask is not None else aligned_base
-    new_idx = b_ptr.replace(src=(b_ptr.src[0], raw_idx) + b_ptr.src[2:])
+    new_idx = b_ptr.replace(src=(b_ptr.src[0], aligned_base.valid(mask) if mask is not None else aligned_base) + b_ptr.src[2:])
     wide_load = ld.replace(src=(new_idx.cast(wide_ptr),), dtype=wide_dtype)
     return ((wide_load >> ((c % n) * 8)) & ((1 << ld.dtype.bitsize) - 1)).cast(dtypes.uint8).bitcast(b_type)
   return None

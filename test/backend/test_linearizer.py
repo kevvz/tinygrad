@@ -390,6 +390,7 @@ class TestByteLoadToWide(unittest.TestCase):
     return [u for u in uops if u.op is Ops.LOAD]
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU has its own byte packing in wgsl.py")
   def test_uint8_load_to_uint16(self):
     a = Tensor.arange(16, dtype=dtypes.uint8).contiguous().realize()
     r = a.cast(dtypes.int32)
