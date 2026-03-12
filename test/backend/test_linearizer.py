@@ -399,6 +399,7 @@ class TestByteLoadToWide(unittest.TestCase):
     assert len(wide) >= 1, f"expected a uint16 wide load, got dtypes: {[l.dtype for l in loads]}"
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU has its own byte packing in wgsl.py")
   def test_uint8_load_to_uint32(self):
     a = Tensor.arange(16, dtype=dtypes.uint8).contiguous().realize()
     r = a.cast(dtypes.int32)
@@ -407,6 +408,7 @@ class TestByteLoadToWide(unittest.TestCase):
     assert len(wide) >= 1, f"expected a uint32 wide load, got dtypes: {[l.dtype for l in loads]}"
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU has its own byte packing in wgsl.py")
   def test_uint8_load_unaligned(self):
     a = Tensor.arange(15, dtype=dtypes.uint8).contiguous().realize()
     r = a.cast(dtypes.int32)
@@ -415,6 +417,7 @@ class TestByteLoadToWide(unittest.TestCase):
     assert len(wide) == 0, f"should not find any load widening, got {[l.dtype for l in loads]}"
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "backend must support uint8")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU has its own byte packing in wgsl.py")
   def test_q8_scale_widens_to_uint32(self):
     buf = Tensor.empty(34, dtype=dtypes.uint8).realize()
     scale = buf[0:1].cast(dtypes.float32)
