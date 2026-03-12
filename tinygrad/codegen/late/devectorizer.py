@@ -103,6 +103,28 @@ def fold_expanded_index(midx:UOp):
   post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace).vec(global_offset), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
+def scalar_to_wide_type(ld:UOp, b_ptr:UOp):
+  # NOTE: this depends on a lot of consecutive bytes being loaded, otherwise this may hurt performance
+  if getenv("WEBGPU"): return None # TODO: remove packed_load, store and replace it with this
+  # any load is a bitload, so we load as uint then bitcast to the outtype
+  if (b_type:=ld.dtype) not in (dtypes.uint8,): return None # more dtypes as needed, no vecs
+  if b_ptr.src[1].dtype.scalar() is not dtypes.index: return None
+  idx, mask = b_ptr.src[1].get_idx(), b_ptr.src[1].get_valid()
+  base, c = (idx.src[0], int(idx.src[1].arg)) if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST else (idx, 0)
+  # try widening by large dtypes first
+  for wide_dtype, n in ((dtypes.uint32, 4), (dtypes.uint16, 2)):
+    # base has to be aligned
+    if (base is not None and base.divides(n) is None) or (b_ptr.ptrdtype.size % n != 0): continue
+    aligned_c = c - c % n
+    aligned_base = idx.const_like(aligned_c) if base is None else (base + base.const_like(aligned_c) if aligned_c else base)
+    if aligned_base.vmax + n - 1 >= b_ptr.ptrdtype.size: continue
+    # mutating the cast seems safer than mutating index
+    wide_ptr = wide_dtype.ptr(size=b_ptr.ptrdtype.size, addrspace=b_ptr.ptrdtype.addrspace)
+    new_idx = b_ptr.replace(src=(b_ptr.src[0], aligned_base.valid(mask) if mask is not None else aligned_base) + b_ptr.src[2:])
+    wide_load = ld.replace(src=(new_idx.cast(wide_ptr),), dtype=wide_dtype)
+    return ((wide_load >> ((c % n) * 8)) & ((1 << ld.dtype.bitsize) - 1)).cast(dtypes.uint8).bitcast(b_type)
+  return None
+
 def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   # TODO: this is written in many places
   offset = 0
@@ -123,6 +145,8 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.VECTORIZE, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
+  # convert scalar byte loads into aligned uint32 wide loads with byte lane extraction
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="b_ptr"),), name="ld"), scalar_to_wide_type),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),

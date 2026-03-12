@@ -14,6 +14,8 @@ from tinygrad.renderer import Renderer
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
+  if m.itemsize == 1 and dtype.itemsize > 1:
+    return from_storage_scalar(sum(m[i+k] << (8*k) for k in range(dtype.itemsize)), dtype)
   return from_storage_scalar(m[i], dtype)
 
 def load(inp, j, dtype: DType):
