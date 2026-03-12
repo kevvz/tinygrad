@@ -421,7 +421,7 @@ class TestByteLoadToWide(unittest.TestCase):
     r = scale * buf[2:34].cast(dtypes.int8).cast(dtypes.float32)
     uops = get_program(r.schedule()[-1].ast, renderer=Device[Device.DEFAULT].renderer).uops
     loads = [u for u in uops if u.op is Ops.LOAD]
-    assert any(l.dtype == dtypes.uint32 for l in loads), f"expected uint32 wide load from byte_pack, got: {[l.dtype for l in loads]}"
+    assert any(l.dtype == dtypes.ushort for l in loads), f"expected uint16 wide load from byte_pack, got: {[l.dtype for l in loads]}"
 
 # *** helpers ***
 
